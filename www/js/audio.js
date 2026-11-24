@@ -75,31 +75,59 @@ export async function play(text, voice = 'any', slow = false) {
 }
 
 // ---------- recording (speaking practice) ----------
-let rec = null, chunks = [];
 export const canRecord = () => !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
-export async function startRecording() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  chunks = [];
-  rec = new MediaRecorder(stream);
-  rec.ondataavailable = e => chunks.push(e.data);
-  rec.start();
-}
-export function stopRecording() {
-  return new Promise(res => {
-    if (!rec) return res(null);
-    rec.onstop = () => {
-      rec.stream.getTracks().forEach(t => t.stop());
-      res(URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/mp4' })));
-      rec = null;
-    };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let stopFlag = false;
+export const stopUtterance = () => { stopFlag = true; };
+
+// Records one spoken answer and stops by itself ~1.2 s after you stop talking.
+// Bluetooth headsets (AirPods) need up to ~1.5 s to switch to their microphone, so we wait
+// for real signal before saying "Praat nou", and release the mic afterwards so the headset
+// returns to high-quality playback before the recording is played back.
+export async function recordUtterance({ onReady, onLevel, maxMs = 9000 } = {}) {
+  stop();
+  stopFlag = false;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  const ac = audioCtx();
+  await ac.resume().catch(() => {});
+  const src = ac.createMediaStreamSource(stream), an = ac.createAnalyser();
+  an.fftSize = 1024; src.connect(an);
+  const buf = new Float32Array(an.fftSize);
+  const level = () => { an.getFloatTimeDomainData(buf); let s = 0; for (const v of buf) s += v * v; return Math.sqrt(s / buf.length); };
+  try {
+    for (const t0 = Date.now(); Date.now() - t0 < 1500 && level() === 0;) await sleep(50); // headset warm-up
+    let floor = 0;
+    for (let i = 0; i < 6; i++) { floor = Math.max(floor, level()); await sleep(30); }
+    const thr = Math.min(0.04, Math.max(0.01, floor * 2.5)); // capped: the "noise" sample may already be speech
+    const rec = new MediaRecorder(stream), chunks = [];
+    rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+    const stopped = new Promise(r => { rec.onstop = r; });
+    rec.start(250);
+    onReady?.();
+    let heard = false, last = Date.now();
+    for (const t0 = Date.now(); !stopFlag && Date.now() - t0 < maxMs;) {
+      const l = level(), t = Date.now();
+      onLevel?.(Math.min(1, l / (thr * 4)));
+      if (l > thr) { heard = true; last = t; }
+      if (heard && t - last > 1200) break;
+      await sleep(50);
+    }
     rec.stop();
-  });
+    await stopped;
+    return { url: chunks.length ? URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/mp4' })) : null, heard };
+  } finally {
+    src.disconnect();
+    stream.getTracks().forEach(t => t.stop());
+  }
 }
-export function playUrl(url) { stop(); return playSrc(url, 1, token); }
+// Short pause first: the headset switches back from microphone mode to playback mode.
+export async function playUrl(url) { stop(); const my = token; await sleep(400); return playSrc(url, 1, my); }
 
 // ---------- speech recognition (only where the browser offers Afrikaans) ----------
+// Safari and iOS app web views expose the API but have no Afrikaans model, so they record instead.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-export const canRecognise = () => !!SR && navigator.onLine;
+const appleWebKit = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent)) || !!window.Capacitor;
+export const canRecognise = () => !!SR && !appleWebKit && navigator.onLine;
 export function recognise() {
   return new Promise((res, rej) => {
     const r = new SR();
@@ -114,10 +142,11 @@ export function recognise() {
 
 // ---------- sound effects (synthesised, no files needed) ----------
 let ctx;
+const audioCtx = () => (ctx ||= new (window.AudioContext || window.webkitAudioContext)());
 function tone(freqs, dur = 0.12, type = 'sine', gap = 0.09) {
   if (!sfxOn) return;
   try {
-    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx();
     freqs.forEach((f, i) => {
       const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime + i * gap;
       o.type = type; o.frequency.value = f;

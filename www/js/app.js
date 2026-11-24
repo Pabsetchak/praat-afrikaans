@@ -437,35 +437,41 @@ const EX = {
     foot.innerHTML = `<button class="btn ghost" data-skip>⏭️ Nie nou nie</button><span></span>`;
     $('[data-skip]', foot).addEventListener('click', () => { speakSnoozeUntil = now() + 15 * 60e3; answer(step, { g: null }); });
     const out = $('.speak-out', body), mic = $('[data-mic]', body);
-    const selfGrade = mine => {
-      out.innerHTML = `${mine ? `<div class="row center"><button class="btn ghost sm" data-mine>▶️ Jy</button><button class="btn ghost sm" data-model>🔊 Model</button></div>` : ''}
+    const selfGrade = (mine, note = '') => {
+      out.innerHTML = `${note ? `<p class="soft">${note}</p>` : ''}${mine ? `<div class="row center"><button class="btn ghost sm" data-mine>▶️ Jy</button><button class="btn ghost sm" data-model>🔊 Model</button></div>` : ''}
         <div class="tag">Hoe het dit geklink?</div>
         <div class="row center self"><button class="btn" data-g="3">😀 Dieselfde</button><button class="btn" data-g="2">😐 Amper</button><button class="btn" data-g="1">😕 Nog nie</button></div>`;
       $('[data-mine]', out)?.addEventListener('click', () => A.playUrl(mine));
       $('[data-model]', out)?.addEventListener('click', () => A.play(text));
       $$('[data-g]', out).forEach(b => b.addEventListener('click', () => answer(step, { g: +b.dataset.g, correct: esc(text), audio: { text } })));
-      if (mine) A.playUrl(mine).then(() => A.play(text));
+      if (mine) A.playUrl(mine).then(ok => ok && L?.steps[L.i] === step && A.play(text));
     };
-    let recording = false;
+    let busy = false;
     mic.addEventListener('click', async () => {
-      if (A.canRecognise()) {
-        mic.classList.add('on'); out.innerHTML = '<div class="tag">Ek luister…</div>';
-        try {
-          const alts = await A.recognise();
-          mic.classList.remove('on');
-          if (!alts.length) return selfGrade(null);
-          const best = alts.map(a => ({ a, ...gradeText(a, text) })).sort((x, y) => y.g - x.g)[0];
-          return answer(step, { g: best.g, note: `Ek het gehoor: “${best.a}”`, correct: esc(text), audio: { text } });
-        } catch { mic.classList.remove('on'); }
-      }
-      if (!A.canRecord()) return selfGrade(null);
-      if (!recording) {
-        try { await A.startRecording(); } catch { return selfGrade(null); }
-        recording = true; mic.classList.add('on'); out.innerHTML = '<div class="tag">Praat nou… tik weer as jy klaar is.</div>';
-      } else {
-        recording = false; mic.classList.remove('on');
-        selfGrade(await A.stopRecording());
-      }
+      if (busy) return A.stopUtterance(); // second tap = "I'm done"
+      busy = true; mic.classList.add('on');
+      try {
+        if (A.canRecognise()) {
+          out.innerHTML = '<div class="tag">Ek luister… praat nou</div>';
+          try {
+            const alts = await A.recognise();
+            if (alts.length) {
+              const best = alts.map(a => ({ a, ...gradeText(a, text) })).sort((x, y) => y.g - x.g)[0];
+              return answer(step, { g: best.g, note: `Ek het gehoor: “${best.a}”`, correct: esc(text), audio: { text } });
+            }
+          } catch { /* no recogniser for this mic or language: record instead */ }
+        }
+        if (!A.canRecord()) return selfGrade(null, 'Sê dit hardop en vergelyk met die model.');
+        out.innerHTML = '<div class="tag">🎧 Mikrofoon word gereed gemaak…</div><div class="meter"><i></i></div>';
+        const bar = $('.meter i', out);
+        const r = await A.recordUtterance({
+          onReady: () => { out.firstElementChild.textContent = '🔴 Praat nou! (tik 🎙️ as jy klaar is)'; },
+          onLevel: l => { bar.style.width = `${Math.round(l * 100)}%`; },
+        });
+        selfGrade(r.url, r.heard ? '' : '🙉 Ek het niks gehoor nie. Is jou mikrofoon of AirPods gekoppel? Probeer weer met 🎙️.');
+      } catch (e) {
+        selfGrade(null, e?.name === 'NotAllowedError' ? '🎙️ Die app mag nie die mikrofoon gebruik nie. Gee toestemming in jou instellings.' : '🎙️ Mikrofoon nie beskikbaar nie.');
+      } finally { busy = false; mic.classList.remove('on'); }
     });
     if (set().autoplay) A.play(text);
   },
@@ -836,8 +842,15 @@ function wordSheet(w) {
   wireAudio(m);
   let url = null, on = false;
   $('[data-rec]', m)?.addEventListener('click', async e => {
-    if (!on) { try { await A.startRecording(); on = true; e.target.classList.add('on'); } catch { toast('🎙️ Mikrofoon nie beskikbaar nie'); } }
-    else { on = false; e.target.classList.remove('on'); url = await A.stopRecording(); $('[data-mine]', m).hidden = false; A.playUrl(url).then(() => A.play(w.af)); }
+    if (on) return A.stopUtterance();
+    on = true; e.target.classList.add('on');
+    try {
+      const r = await A.recordUtterance();
+      url = r.url;
+      if (!r.heard) toast('🙉 Ek het niks gehoor nie. Kyk na jou mikrofoon of AirPods.');
+      if (url) { $('[data-mine]', m).hidden = false; A.playUrl(url).then(ok => ok && A.play(w.af)); }
+    } catch { toast('🎙️ Mikrofoon nie beskikbaar nie'); }
+    finally { on = false; e.target.classList.remove('on'); }
   });
   $('[data-mine]', m)?.addEventListener('click', () => url && A.playUrl(url));
   A.play(w.af);

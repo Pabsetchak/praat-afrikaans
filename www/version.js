@@ -1,1 +1,1 @@
-self.APP_VERSION = '3fc2a5a0e7';
+self.APP_VERSION = '61a0e9340c';

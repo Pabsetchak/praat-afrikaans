@@ -231,3 +231,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .check { margin: 0; padding-left: 1.2em; } .check li { margin: 4px 0; }
 .choices.text { grid-template-columns: 1fr; } .choices.text .choice { font-size: 1.05rem; text-align: left; padding-left: 30px; }
 textarea.essay { min-height: 220px; font-size: 1.05rem; }
+.meter { height: 12px; background: var(--line); border-radius: 9px; overflow: hidden; max-width: 260px; margin: 6px auto; }
+.meter i { display: block; height: 100%; width: 0; background: var(--good); border-radius: 9px; transition: width .08s; }
