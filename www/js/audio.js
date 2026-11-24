@@ -28,10 +28,13 @@ let rate = 1, sfxOn = true, token = 0;
 export const setRate = r => { rate = r; };
 export const setSfx = on => { sfxOn = on; };
 
+let bufSrc = null; // Web Audio source playing back the learner's own recording
 export function stop() {
   token++;
   el.onended = el.onerror = null;
   el.pause();
+  try { bufSrc?.stop(); } catch { /* already ended */ }
+  bufSrc = null;
   if ('speechSynthesis' in window) speechSynthesis.cancel();
 }
 
@@ -99,10 +102,11 @@ export async function recordUtterance({ onReady, onLevel, maxMs = 9000 } = {}) {
     let floor = 0;
     for (let i = 0; i < 6; i++) { floor = Math.max(floor, level()); await sleep(30); }
     const thr = Math.min(0.04, Math.max(0.01, floor * 2.5)); // capped: the "noise" sample may already be speech
-    const rec = new MediaRecorder(stream), chunks = [];
+    const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find(t => MediaRecorder.isTypeSupported?.(t));
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined), chunks = [];
     rec.ondataavailable = e => e.data.size && chunks.push(e.data);
     const stopped = new Promise(r => { rec.onstop = r; });
-    rec.start(250);
+    rec.start(); // one chunk: Safari's time-sliced chunks often will not play once joined
     onReady?.();
     let heard = false, last = Date.now();
     for (const t0 = Date.now(); !stopFlag && Date.now() - t0 < maxMs;) {
@@ -114,14 +118,36 @@ export async function recordUtterance({ onReady, onLevel, maxMs = 9000 } = {}) {
     }
     rec.stop();
     await stopped;
-    return { url: chunks.length ? URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/mp4' })) : null, heard };
+    const blob = chunks.length ? new Blob(chunks, { type: rec.mimeType || mime || 'audio/mp4' }) : null;
+    return { blob, url: blob && URL.createObjectURL(blob), heard };
   } finally {
     src.disconnect();
     stream.getTracks().forEach(t => t.stop());
   }
 }
 // Short pause first: the headset switches back from microphone mode to playback mode.
-export async function playUrl(url) { stop(); const my = token; await sleep(400); return playSrc(url, 1, my); }
+// Plays a recordUtterance() result. Web Audio first: iPhone's <audio> element often refuses
+// MediaRecorder blobs; the <audio> element is the fallback.
+export async function playRecording(r) {
+  stop();
+  const my = token, ac = audioCtx();
+  const resumed = ac.resume().catch(() => {}); // inside the tap: iOS only resumes audio during a user gesture
+  await sleep(400);
+  if (my !== token || !r?.blob) return false;
+  try {
+    await resumed;
+    r.buf ||= await ac.decodeAudioData(await r.blob.arrayBuffer());
+    if (my !== token) return false;
+    return await new Promise(res => {
+      const s = ac.createBufferSource();
+      s.buffer = r.buf; s.connect(ac.destination);
+      s.onended = () => res(my === token);
+      bufSrc = s; s.start();
+    });
+  } catch {
+    return playSrc(r.url, 1, my);
+  }
+}
 
 // ---------- speech recognition (only where the browser offers Afrikaans) ----------
 // Safari and iOS app web views expose the API but have no Afrikaans model, so they record instead.

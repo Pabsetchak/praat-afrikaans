@@ -441,10 +441,10 @@ const EX = {
       out.innerHTML = `${note ? `<p class="soft">${note}</p>` : ''}${mine ? `<div class="row center"><button class="btn ghost sm" data-mine>▶️ Jy</button><button class="btn ghost sm" data-model>🔊 Model</button></div>` : ''}
         <div class="tag">Hoe het dit geklink?</div>
         <div class="row center self"><button class="btn" data-g="3">😀 Dieselfde</button><button class="btn" data-g="2">😐 Amper</button><button class="btn" data-g="1">😕 Nog nie</button></div>`;
-      $('[data-mine]', out)?.addEventListener('click', () => A.playUrl(mine));
+      $('[data-mine]', out)?.addEventListener('click', () => A.playRecording(mine));
       $('[data-model]', out)?.addEventListener('click', () => A.play(text));
       $$('[data-g]', out).forEach(b => b.addEventListener('click', () => answer(step, { g: +b.dataset.g, correct: esc(text), audio: { text } })));
-      if (mine) A.playUrl(mine).then(ok => ok && L?.steps[L.i] === step && A.play(text));
+      if (mine) A.playRecording(mine).then(ok => ok && L?.steps[L.i] === step && A.play(text));
     };
     let busy = false;
     mic.addEventListener('click', async () => {
@@ -463,7 +463,7 @@ const EX = {
         }
         if (!A.canRecord()) return selfGrade(null, 'Sê dit hardop en vergelyk met die model.');
         const r = await recordInto(out);
-        selfGrade(r.url, r.note);
+        selfGrade(r.blob && r, r.note);
       } finally { busy = false; mic.classList.remove('on'); }
     });
     if (set().autoplay) A.play(text);
@@ -857,9 +857,9 @@ function wordSheet(w) {
     try {
       const r = await recordInto(out);
       out.innerHTML = `${r.note ? `<p class="soft">${r.note}</p>` : ''}${r.url ? `<div class="row center"><button class="btn ghost sm" data-mine>▶️ Jy</button><button class="btn ghost sm" data-model>🔊 Model</button></div>` : ''}`;
-      $('[data-mine]', out)?.addEventListener('click', () => A.playUrl(r.url));
+      $('[data-mine]', out)?.addEventListener('click', () => A.playRecording(r));
       $('[data-model]', out)?.addEventListener('click', () => A.play(w.af));
-      if (r.url) A.playUrl(r.url).then(ok => ok && m.isConnected && A.play(w.af));
+      if (r.url) A.playRecording(r).then(ok => ok && m.isConnected && A.play(w.af));
     } finally { on = false; e.target.classList.remove('on'); }
   });
   A.play(w.af);
