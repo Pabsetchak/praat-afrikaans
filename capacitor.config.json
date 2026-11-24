@@ -1,0 +1,10 @@
+{
+  "appId": "app.praatafrikaans.leer",
+  "appName": "Praat Afrikaans",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#f6f4ef",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}

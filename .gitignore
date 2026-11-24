@@ -1,0 +1,7 @@
+node_modules/
+ios/
+android/
+tools/texts.json
+*.ipa
+Payload/
+.DS_Store

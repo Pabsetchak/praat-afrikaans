@@ -1,0 +1,67 @@
+# Builds an unsigned .ipa on a GitHub-hosted Mac (no Mac or Apple account needed to build).
+# Install it with Sideloadly or AltStore, which sign it with your own Apple ID.
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['www/**', 'capacitor.config.json', 'package.json', '.github/workflows/ios.yml']
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Capacitor
+        run: npm install
+
+      - name: Check course and refresh offline file list
+        run: node tools/build.mjs
+
+      - name: Create the iOS project
+        run: npx cap add ios
+
+      - name: Icon, microphone text, audio with silent switch on
+        run: |
+          set -e
+          for f in ios/App/App/Assets.xcassets/AppIcon.appiconset/*.png; do cp www/icons/icon-1024.png "$f"; done
+          PL=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Neem jou stem op om jou uitspraak te oefen.'" "$PL"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Afrikaans" "$PL" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Afrikaans" "$PL"
+          /usr/libexec/PlistBuddy -c "Add :UIRequiresFullScreen bool true" "$PL" || true
+          # Play lesson audio even when the ring/silent switch is on.
+          AD=ios/App/App/AppDelegate.swift
+          sed -i '' 's/^import UIKit/import UIKit\nimport AVFoundation/' "$AD"
+          sed -i '' 's|// Override point for customization after application launch.|try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])|' "$AD"
+          grep -n "AVAudioSession" "$AD"
+
+      - name: Copy web app into the iOS project
+        run: npx cap sync ios
+
+      - name: Build (unsigned)
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          if [ -d App.xcworkspace ]; then T="-workspace App.xcworkspace"; else T="-project App.xcodeproj"; fi
+          xcodebuild $T -scheme App -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 40
+
+      - name: Package the .ipa
+        run: |
+          mkdir -p Payload
+          cp -R ios/App/build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry PraatAfrikaans.ipa Payload
+          ls -lh PraatAfrikaans.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PraatAfrikaans-ipa
+          path: PraatAfrikaans.ipa
+          retention-days: 90

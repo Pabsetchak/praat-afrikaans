@@ -1,0 +1,22 @@
+{
+  "name": "praat-afrikaans",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline Afrikaans learning app (PWA + iOS) that teaches through pictures, sound and stories.",
+  "scripts": {
+    "check": "node tools/build.mjs",
+    "audio": "node tools/build.mjs && python tools/gen_audio.py && node tools/build.mjs",
+    "build": "node tools/build.mjs",
+    "serve": "npx --yes http-server www -p 8080 -c-1",
+    "ios:add": "npx cap add ios",
+    "ios:sync": "npx cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  }
+}
