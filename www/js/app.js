@@ -131,7 +131,7 @@ function clozeParts(item) {
 }
 
 // ---------------- lesson engine ----------------
-let L = null;
+let L = null, updatePending = false;
 const lessonEl = () => $('#lesson');
 
 function buildSteps(spec) {
@@ -190,6 +190,7 @@ function closeLesson(apply = true) {
   lessonEl().hidden = true;
   document.body.classList.remove('in-lesson');
   render();
+  if (updatePending) reloadForUpdate(); // an update arrived during the lesson
 }
 
 function applyResults(finished) {
@@ -954,13 +955,29 @@ document.addEventListener('keydown', e => {
 
 // Offline: service worker (web only; the iOS app ships every file inside the app).
 if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !window.Capacitor) {
+  // Self-updating: check whenever the app is opened or comes back to the front (home-screen apps
+  // on iPhone usually resume instead of reloading) and every 30 min. When the new version has
+  // finished downloading it takes over and the page reloads itself, after any open lesson.
+  const hadController = !!navigator.serviceWorker.controller;
+  // Android/Chrome say whether we are on Wi-Fi; iPhone does not, so there we always allow it
+  // (updates are small: audio is reused from the previous version).
+  const okToUpdate = () => { const c = navigator.connection; return navigator.onLine && !c?.saveData && (!c?.type || ['wifi', 'ethernet'].includes(c.type)); };
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
-    reg.addEventListener('updatefound', () => {
-      const w = reg.installing;
-      w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) toast('✨ Nuwe weergawe gereed – maak die app weer oop.', 5000); });
-    });
+    const check = () => okToUpdate() && reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    addEventListener('online', check);
+    setInterval(check, 30 * 60e3);
   }).catch(() => {});
-  navigator.serviceWorker.addEventListener('message', e => { if (e.data?.type === 'cached') toast(`✅ Gereed vir gebruik sonder internet (${e.data.n} lêers)`); });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || updatePending) return; // first install: nothing to refresh
+    updatePending = true;
+    if (!L) reloadForUpdate();
+  });
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data?.type === 'cached' && !hadController) toast(`✅ Gereed vir gebruik sonder internet (${e.data.n} lêers)`); });
+}
+function reloadForUpdate() {
+  toast('✨ Nuwe weergawe – word opgedateer…');
+  setTimeout(() => location.reload(), 900);
 }
 navigator.storage?.persist?.().catch(() => {});
 

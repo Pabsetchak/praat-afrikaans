@@ -1,2 +1,2 @@
-self.APP_VERSION = '8413930578';
-self.APP_BUILD = '1.0.4';
+self.APP_VERSION = '4cdbea165a';
+self.APP_BUILD = '1.0.5';

@@ -7,9 +7,17 @@ self.addEventListener('install', e => {
   e.waitUntil((async () => {
     const list = await (await fetch('assets.json', { cache: 'no-store' })).json();
     const cache = await caches.open(CACHE);
+    // Audio and icons are named by content and never change: copy them from the previous
+    // version's cache, so an update only downloads the changed code (a few hundred KB, not 30 MB).
+    const reuse = async u => {
+      if (!/^(audio|icons)\//.test(u)) return false;
+      const hit = await caches.match(u);
+      if (hit) await cache.put(u, hit);
+      return !!hit;
+    };
     // Add in batches so one slow file does not block the rest.
     for (let i = 0; i < list.length; i += 40) {
-      await Promise.all(list.slice(i, i + 40).map(u => cache.add(new Request(u, { cache: 'reload' })).catch(() => {})));
+      await Promise.all(list.slice(i, i + 40).map(async u => (await reuse(u)) || cache.add(new Request(u, { cache: 'reload' })).catch(() => {})));
     }
     self.cachedCount = list.length;
     await self.skipWaiting();
