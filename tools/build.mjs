@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { UNITS, SOUNDS, WORDS, SENTENCES, strip } from '../www/js/course.js';
 import { MODULES } from '../www/js/curriculum.js';
 
@@ -53,7 +54,11 @@ const h = createHash('sha1');
 for (const f of files) h.update(f).update(readFileSync(join(www, f)));
 const version = h.digest('hex').slice(0, 10);
 writeFileSync(join(www, 'assets.json'), JSON.stringify(['./', 'version.js', ...files]));
-writeFileSync(join(www, 'version.js'), `self.APP_VERSION = '${version}';\n`);
+// Human build number: one step per commit, so every published update shows a higher number.
+let commits = 0;
+try { commits = Number(execSync('git rev-list --count HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { /* not a git checkout */ }
+const build = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version.split('.').slice(0, 2).join('.') + '.' + commits;
+writeFileSync(join(www, 'version.js'), `self.APP_VERSION = '${version}';\nself.APP_BUILD = '${build}';\n`);
 
 console.log(`units ${UNITS.length} · words ${WORDS.length} · pattern sentences ${SENTENCES.length} · sounds ${SOUNDS.length}`);
-console.log(`recordings ${texts.size} (${missing.length} missing) · offline files ${files.length} · version ${version}`);
+console.log(`build v${build} · recordings ${texts.size} (${missing.length} missing) · offline files ${files.length} · version ${version}`);

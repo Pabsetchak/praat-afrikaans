@@ -462,15 +462,8 @@ const EX = {
           } catch { /* no recogniser for this mic or language: record instead */ }
         }
         if (!A.canRecord()) return selfGrade(null, 'Sê dit hardop en vergelyk met die model.');
-        out.innerHTML = '<div class="tag">🎧 Mikrofoon word gereed gemaak…</div><div class="meter"><i></i></div>';
-        const bar = $('.meter i', out);
-        const r = await A.recordUtterance({
-          onReady: () => { out.firstElementChild.textContent = '🔴 Praat nou! (tik 🎙️ as jy klaar is)'; },
-          onLevel: l => { bar.style.width = `${Math.round(l * 100)}%`; },
-        });
-        selfGrade(r.url, r.heard ? '' : '🙉 Ek het niks gehoor nie. Is jou mikrofoon of AirPods gekoppel? Probeer weer met 🎙️.');
-      } catch (e) {
-        selfGrade(null, e?.name === 'NotAllowedError' ? '🎙️ Die app mag nie die mikrofoon gebruik nie. Gee toestemming in jou instellings.' : '🎙️ Mikrofoon nie beskikbaar nie.');
+        const r = await recordInto(out);
+        selfGrade(r.url, r.note);
       } finally { busy = false; mic.classList.remove('on'); }
     });
     if (set().autoplay) A.play(text);
@@ -792,7 +785,7 @@ const SCREENS = {
       <p class="soft">Hierdie app leer Afrikaans deur prentjies, klank en stories – sonder vertaling. Hersiening werk met FSRS (gespasieerde herhaling). Stemme: Adri en Willem (neurale stemme).</p>
       <p class="soft">This app teaches Afrikaans through pictures, sound and stories, without translation. Trust the pictures; guessing from context is part of how the brain learns.</p>
       <div class="row"><button class="btn ghost" data-intro>👋 Wys inleiding</button><button class="btn danger" data-reset>🗑️ Begin van voor af</button></div>
-      <p class="soft ver">Weergawe ${window.APP_VERSION || ''}</p>`;
+      <p class="soft ver">Weergawe v${window.APP_BUILD || '?'} (${window.APP_VERSION || ''})</p>`;
   },
 };
 
@@ -830,6 +823,22 @@ const BIND = {
   },
 };
 
+// Shared recording panel (lessons and woordeboek): status line, live level meter, auto-stop.
+// Returns { url, heard, note } – note explains a silent recording or a mic error.
+async function recordInto(out) {
+  out.innerHTML = '<div class="tag">🎧 Mikrofoon word gereed gemaak…</div><div class="meter"><i></i></div>';
+  const bar = $('.meter i', out);
+  try {
+    const r = await A.recordUtterance({
+      onReady: () => { out.firstElementChild.textContent = '🔴 Praat nou! (tik 🎙️ as jy klaar is)'; },
+      onLevel: l => { bar.style.width = `${Math.round(l * 100)}%`; },
+    });
+    return { ...r, note: r.heard ? '' : '🙉 Ek het niks gehoor nie. Is jou mikrofoon of AirPods gekoppel? Probeer weer met 🎙️.' };
+  } catch (e) {
+    return { url: null, heard: false, note: e?.name === 'NotAllowedError' ? '🎙️ Die app mag nie die mikrofoon gebruik nie. Gee toestemming in jou instellings.' : '🎙️ Mikrofoon nie beskikbaar nie.' };
+  }
+}
+
 function wordSheet(w) {
   const c = S().cards[w.id];
   const days = c ? Math.max(0, Math.round((c.due - now()) / 864e5)) : null;
@@ -838,21 +847,21 @@ function wordSheet(w) {
     ${en(w.en)}
     <div class="ex"><button class="aud sm" data-play="${esc(w.ex)}">🔊</button> ${hiWord(w.ex, w.af)}</div>
     <p class="soft">${c ? `🧠 Sterkte ${Math.round(retrievability(c) * 100)}% · volgende hersiening ${days ? `oor ${days} ${days === 1 ? 'dag' : 'dae'}` : 'nou'}` : '🆕 Nog nie geleer nie'}</p>
-    ${A.canRecord() ? `<div class="row center"><button class="mic" data-rec>🎙️</button><button class="btn ghost sm" data-mine hidden>▶️ Jy</button></div>` : ''}`);
+    ${A.canRecord() ? `<div class="tag">🗣️ Sê dit hardop en vergelyk</div><div class="row center"><button class="mic" data-rec aria-label="Neem op">🎙️</button></div><div class="speak-out"></div>` : ''}`);
   wireAudio(m);
-  let url = null, on = false;
+  let on = false;
   $('[data-rec]', m)?.addEventListener('click', async e => {
     if (on) return A.stopUtterance();
     on = true; e.target.classList.add('on');
+    const out = $('.speak-out', m);
     try {
-      const r = await A.recordUtterance();
-      url = r.url;
-      if (!r.heard) toast('🙉 Ek het niks gehoor nie. Kyk na jou mikrofoon of AirPods.');
-      if (url) { $('[data-mine]', m).hidden = false; A.playUrl(url).then(ok => ok && A.play(w.af)); }
-    } catch { toast('🎙️ Mikrofoon nie beskikbaar nie'); }
-    finally { on = false; e.target.classList.remove('on'); }
+      const r = await recordInto(out);
+      out.innerHTML = `${r.note ? `<p class="soft">${r.note}</p>` : ''}${r.url ? `<div class="row center"><button class="btn ghost sm" data-mine>▶️ Jy</button><button class="btn ghost sm" data-model>🔊 Model</button></div>` : ''}`;
+      $('[data-mine]', out)?.addEventListener('click', () => A.playUrl(r.url));
+      $('[data-model]', out)?.addEventListener('click', () => A.play(w.af));
+      if (r.url) A.playUrl(r.url).then(ok => ok && m.isConnected && A.play(w.af));
+    } finally { on = false; e.target.classList.remove('on'); }
   });
-  $('[data-mine]', m)?.addEventListener('click', () => url && A.playUrl(url));
   A.play(w.af);
 }
 
@@ -955,6 +964,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !win
 }
 navigator.storage?.persist?.().catch(() => {});
 
+document.body.insertAdjacentHTML('beforeend', `<div id="ver" aria-hidden="true">v${window.APP_BUILD || '?'}</div>`);
 applySettings();
 render();
 if (!S().onboarded) onboarding();
