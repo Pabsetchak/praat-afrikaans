@@ -70,6 +70,34 @@ for (const u of UNITS) {
 const nextLesson = () => PATH.find(l => !S().done[l.key]);
 const unitLessons = id => PATH.filter(l => l.unit === id);
 
+// Dagbegin: on a new day, actively recall what you practised on your last study day.
+// (Retrieval the next day, after sleep, strengthens new memories more than re-reading.)
+function dayStartItems() {
+  const today = St.dayKey(), byDay = {};
+  for (const [id, c] of Object.entries(S().cards)) {
+    const k = St.dayKey(c.last);
+    if (BY_ID[id] && k < today) (byDay[k] ||= []).push(id);
+  }
+  const last = Object.keys(byDay).sort().pop();
+  if (!last) return [];
+  return byDay[last].sort((a, b) => retrievability(S().cards[a]) - retrievability(S().cards[b])).slice(0, 15);
+}
+const dayStartDone = () => S().dayStart?.done === St.dayKey();
+function maybeDayStart() {
+  const today = St.dayKey();
+  if (L || !S().onboarded || S().dayStart?.shown === today || $('.modal-bg')) return;
+  const ids = dayStartItems();
+  if (!ids.length) return;
+  (S().dayStart ||= {}).shown = today; St.save();
+  startLesson({ type: 'daystart', ids: shuffle(ids) });
+}
+// Recall, not recognition: produce the word or sentence from memory.
+function recallExercise(item) {
+  if (item.kind === 'g') return 'drill';
+  const opts = (item.kind === 'w' ? ['typePic', 'dictWord', 'speak'] : ['dictation', 'build', 'speak']).filter(t => allowed(t, item));
+  return rnd(opts) || (item.kind === 'w' ? 'picWord' : 'build');
+}
+
 const dueCards = () => Object.entries(S().cards).filter(([id, c]) => c.due <= now() && BY_ID[id]).sort((a, b) => a[1].due - b[1].due).map(([id]) => id);
 const learnedWords = () => WORDS.filter(w => S().cards[w.id]);
 const strongWords = () => WORDS.filter(w => S().cards[w.id]?.s >= 21);
@@ -167,6 +195,8 @@ function buildSteps(spec) {
     steps.push({ t: 'module', mod: spec.mod });
     spec.mod.items.forEach(d => steps.push({ t: 'drill', item: d }));
     if (spec.mod.task) steps.push({ t: 'write', mod: spec.mod });
+  } else if (spec.type === 'daystart') {
+    steps.push({ t: 'dayIntro', ids: spec.ids }, ...spec.ids.map(id => ({ t: recallExercise(BY_ID[id]), item: BY_ID[id] })));
   } else if (spec.type === 'review') {
     steps.push(...spec.ids.map(id => ({ t: exerciseFor(BY_ID[id]), item: BY_ID[id] })));
   }
@@ -185,6 +215,7 @@ function startLesson(spec) {
 
 function closeLesson(apply = true) {
   A.stop();
+  if (L?.spec.type === 'daystart' && L.i >= L.steps.length) { (S().dayStart ||= {}).done = St.dayKey(); St.save(); }
   if (apply && L) applyResults(false);
   L = null;
   lessonEl().hidden = true;
@@ -537,6 +568,16 @@ const EX = {
     textInput(body, foot, w, { onCheck: v => answer({ ...step, graded: false }, { ...gradeText(v, w), correct: `<b>${esc(w)}</b>`, audio: { text: w } }) });
   },
 };
+EX.dayIntro = (step, body, foot) => {
+  const h = new Date().getHours(), greet = h < 12 ? 'Goeiemôre' : h < 18 ? 'Goeiemiddag' : 'Goeienaand';
+  body.innerHTML = `<div class="pic huge bounce">☀️</div><h2 class="ptitle">${greet}! Dagbegin</h2>
+    <p class="rule">Onthou jy nog wat jy laas geleer het? Haal elke antwoord uit jou geheue – dit maak die woorde sterk.</p>
+    <div class="ds-pics">${step.ids.map(id => `<span class="pic sm">${esc(BY_ID[id].pic)}</span>`).join('')}</div>
+    <p class="soft" style="text-align:center">${step.ids.length} ${step.ids.length === 1 ? 'oefening' : 'oefeninge'} · ±${Math.max(1, Math.round(step.ids.length * 0.4))} min</p>`;
+  if (set().autoplay) A.play(`${greet}!`, 'f');
+  continueFoot(foot, 'Begin ➜');
+};
+
 // ---- curriculum (CAPS) exercises ----
 const LV = { EAT: 'EAT + HT', HT: 'HT' };
 const isLit = m => m.g === 'lit';
@@ -673,6 +714,7 @@ function ring(p, label) {
 
 const SCREENS = {
   home() {
+    let dsN;
     const d = St.today(), goal = set().goal, nxt = nextLesson(), due = dueCards().length;
     const unit = nxt && ALL_UNITS.find(u => u.id === nxt.unit);
     const tooMany = nxt?.type === 'words' && d.new >= set().newPerDay;
@@ -691,6 +733,7 @@ const SCREENS = {
         ${tooMany ? `<p class="soft">🧠 Genoeg nuwe woorde vir vandag. Hersien eerder – jou brein onthou beter so.</p>` : ''}
         <button class="btn primary big" data-start="${nxt.key}">▶ ${S().done[PATH[0].key] ? 'Gaan voort' : 'Begin'}</button>
       </section>` : `<section class="hero"><div class="pic huge">👑</div><p>Jy het die hele kursus klaar! Hersien elke dag en lees in die Bronne.</p></section>`}
+      ${!dayStartDone() && (dsN = dayStartItems().length) ? `<button class="btn daystart" data-daystart>☀️ Dagbegin <span class="pill sun">${dsN}</span></button>` : ''}
       <button class="btn review ${due ? '' : 'calm'}" data-review>🔁 Hersien ${due ? `<span class="pill">${due}</span>` : '✓'}</button>
       <h3 class="sec">🗺️ Jou pad</h3>
       <div class="units">${ALL_UNITS.map((u, i) => {
@@ -927,6 +970,7 @@ function applySettings() {
 document.addEventListener('click', e => {
   const s = e.target.closest('[data-start]');
   if (s) { const spec = PATH.find(l => l.key === s.dataset.start); if (spec) startLesson(spec); }
+  if (e.target.closest('[data-daystart]')) { const ids = dayStartItems(); if (ids.length) startLesson({ type: 'daystart', ids: shuffle(ids) }); }
   const r = e.target.closest('[data-review]');
   if (r) {
     let ids = dueCards().slice(0, 20);
@@ -985,4 +1029,11 @@ document.body.insertAdjacentHTML('beforeend', `<div id="ver" aria-hidden="true">
 applySettings();
 render();
 if (!S().onboarded) onboarding();
+else maybeDayStart();
+// Apps left open overnight: re-check the day when the app comes back to the front.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || L) return;
+  render();
+  maybeDayStart();
+});
 if ('speechSynthesis' in window) speechSynthesis.getVoices();

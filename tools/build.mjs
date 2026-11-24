@@ -34,6 +34,7 @@ for (const s of SENTENCES) add(s.af);
 for (const u of UNITS) for (const l of u.story.lines) add(l.text, [l.v]);
 for (const s of SOUNDS) for (const w of s.w) add(w);
 add('Welkom! Kom ons begin.', ['f']);
+for (const g of ['Goeiemôre!', 'Goeiemiddag!', 'Goeienaand!']) add(g, ['f']); // Dagbegin greeting
 for (const m of MODULES) {
   for (const x of m.ex || []) add(x, ['f']);
   if (m.g === 'lit' && m.text) for (const l of m.text.split('\n')) if (l.trim()) add(l, ['f']);

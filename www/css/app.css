@@ -235,3 +235,6 @@ textarea.essay { min-height: 220px; font-size: 1.05rem; }
 .meter i { display: block; height: 100%; width: 0; background: var(--good); border-radius: 9px; transition: width .08s; }
 #ver { position: fixed; left: 8px; bottom: calc(66px + var(--safe-b)); font-size: .72rem; color: var(--soft); opacity: .7; pointer-events: none; z-index: 6; }
 body.in-lesson #ver { display: none; }
+.btn.daystart { width: 100%; font-size: 1.1rem; min-height: 54px; margin-bottom: 8px; background: linear-gradient(135deg, #fde68a, #fbbf24); color: #3b2600; }
+.pill.sun { background: #b45309; }
+.ds-pics { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
